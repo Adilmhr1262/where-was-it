@@ -70,7 +70,9 @@ var app=document.getElementById("app");
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function uid(){return "i_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,8);}
 function fmtDate(t){try{return new Date(t).toLocaleString();}catch(e){return String(t);}}
-function openDB(){return new Promise(function(res,rej){var r=indexedDB.open(DB_NAME,DB_VERSION);r.onupgradeneeded=function(){var db=r.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE,{keyPath:"id"});if(!db.objectStoreNames.contains(LOC_STORE))db.createObjectStore(LOC_STORE,{keyPath:"name"});};r.onsuccess=function(){res(r.result);};r.onerror=function(){rej(r.error);};});}
+function openDB(){return new Promise(function(res,rej){var r=indexedDB.open(DB_NAME,DB_VERSION);r.onupgradeneeded=function(){var db=r.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE,{keyPath:"id"});if(!db.objectStoreNames.contains(LOC_STORE))db.createObjectStore(LOC_STORE,{keyPath:"name"});};r.onsuccess=function(){var db=r.result;db.onclose=function(){dbPromise=openDB();};res(db);};r.onerror=function(){rej(r.error);};});}
+function reopenDB(){dbPromise=openDB();return dbPromise;}
+function dbRetry(fn){return dbPromise.then(fn).catch(function(err){var msg=(err&&(err.message||err.name))||"";if(/closing/i.test(msg)){return reopenDB().then(fn);}throw err;});}
 function tx(db,store,mode){return db.transaction(store,mode).objectStore(store);}
 function getAll(db,store){return new Promise(function(res,rej){var r=tx(db,store,"readonly").getAll();r.onsuccess=function(){res(r.result||[]);};r.onerror=function(){rej(r.error);};});}
 function put(db,store,val){return new Promise(function(res,rej){var r=tx(db,store,"readwrite").put(val);r.onsuccess=function(){res();};r.onerror=function(){rej(r.error);};});}
@@ -78,13 +80,13 @@ function del(db,store,key){return new Promise(function(res,rej){var r=tx(db,stor
 function clearStore(db,store){return new Promise(function(res,rej){var r=tx(db,store,"readwrite").clear();r.onsuccess=function(){res();};r.onerror=function(){rej(r.error);};});}
 var dbPromise=openDB();
 var cache={items:[],locations:[]};
-function loadCache(){return dbPromise.then(function(db){return Promise.all([getAll(db,STORE),getAll(db,LOC_STORE)]).then(function(a){cache.items=a[0].sort(function(x,y){return y.updatedAt-x.updatedAt;});cache.locations=a[1].map(function(l){return l.name;}).sort();});});}
-function saveItem(item){return dbPromise.then(function(db){return put(db,STORE,item);}).then(loadCache);}
-function deleteItem(id){return dbPromise.then(function(db){return del(db,STORE,id);}).then(loadCache);}
-function saveLocation(name){name=name.trim();if(!name)return Promise.resolve();return dbPromise.then(function(db){return put(db,LOC_STORE,{name:name});}).then(loadCache);}
-function deleteLocation(name){return dbPromise.then(function(db){return del(db,LOC_STORE,name);}).then(loadCache);}
+function loadCache(){return dbRetry(function(db){return Promise.all([getAll(db,STORE),getAll(db,LOC_STORE)]).then(function(a){cache.items=a[0].sort(function(x,y){return y.updatedAt-x.updatedAt;});cache.locations=a[1].map(function(l){return l.name;}).sort();});});}
+function saveItem(item){return dbRetry(function(db){return put(db,STORE,item);}).then(loadCache);}
+function deleteItem(id){return dbRetry(function(db){return del(db,STORE,id);}).then(loadCache);}
+function saveLocation(name){name=name.trim();if(!name)return Promise.resolve();return dbRetry(function(db){return put(db,LOC_STORE,{name:name});}).then(loadCache);}
+function deleteLocation(name){return dbRetry(function(db){return del(db,LOC_STORE,name);}).then(loadCache);}
 function statusBox(id,ok,msg){var el=document.getElementById(id);if(!el)return;el.className="status show "+(ok?"ok":"err");el.textContent=msg;}
-function armConfirm(btn,armedText,doIt){if(btn.getAttribute("data-armed")==="1"){btn.removeAttribute("data-armed");doIt();return;}var old=btn.textContent;btn.setAttribute("data-armed","1");btn.textContent=armedText;setTimeout(function(){if(btn.getAttribute("data-armed")==="1"){btn.removeAttribute("data-armed");btn.textContent=old;}},5000);}
+function armConfirm(btn,armedText,doIt){if(btn.getAttribute("data-armed")==="1"){btn.removeAttribute("data-armed");doIt();return;}var old=btn.textContent;btn.setAttribute("data-armed","1");btn.textContent=armedText;setTimeout(function(){if(btn.getAttribute("data-armed")==="1"){btn.removeAttribute("data-armed");btn.textContent=old;}},15000);}
 function itemCard(it){var star=it.favorite?'<span class="fav" aria-label="Favorite">★ Favorite</span>':"";var photo=it.photo?'<img src="'+esc(it.photo)+'" alt="Photo of '+esc(it.name)+'">':"";return '<article class="card item" data-open="'+esc(it.id)+'" tabindex="0" role="button" aria-label="Open '+esc(it.name)+'">'+photo+'<h3 style="margin:12px 0 4px">'+esc(it.name)+' '+star+'</h3><p style="margin:0"><span class="badge">'+esc(it.category||"Uncategorized")+'</span></p><p style="margin:8px 0 0"><strong>Where:</strong> '+esc(it.location)+'</p><p class="muted" style="margin:4px 0 0;font-size:14px">Updated '+esc(fmtDate(it.updatedAt))+'</p></article>';}
 function filterItems(q){q=(q||"").trim().toLowerCase();if(!q)return cache.items.slice();return cache.items.filter(function(it){return (it.name+" "+(it.category||"")+" "+it.location+" "+(it.notes||"")).toLowerCase().indexOf(q)>=0;});}
 function listHTML(items,emptyMsg){if(!items.length)return '<div class="card empty"><p>'+esc(emptyMsg)+'</p><p><a class="btn" href="#/add" style="text-decoration:none">Add your first item</a></p></div>';return '<div class="grid">'+items.map(itemCard).join("")+'</div>';}
@@ -203,7 +205,7 @@ function planImport(data,existingIds){
   return {items:fresh,locations:locs,skipped:skipped};
 }
 function importAtomic(items,locations){
-  return dbPromise.then(function(db){return new Promise(function(res,rej){
+  return dbRetry(function(db){return new Promise(function(res,rej){
     var t=db.transaction([STORE,LOC_STORE],"readwrite");
     var si=t.objectStore(STORE),sl=t.objectStore(LOC_STORE);
     items.forEach(function(it){si.put(it);});
@@ -214,7 +216,7 @@ function importAtomic(items,locations){
   });}).then(loadCache);
 }
 function clearAtomic(){
-  return dbPromise.then(function(db){return new Promise(function(res,rej){
+  return dbRetry(function(db){return new Promise(function(res,rej){
     var t=db.transaction([STORE,LOC_STORE],"readwrite");
     t.objectStore(STORE).clear();t.objectStore(LOC_STORE).clear();
     t.oncomplete=function(){res();};
