@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhereWasIt — Find your things</title>
+<meta name="description" content="WhereWasIt: a personal item-location tracker. Record where you put things, search instantly, and keep a location history. All data stays in your browser.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F8F7F3;--card:#FFFFFF;--primary:#66866B;--primary-dark:#4F6B55;--text:#26352B;--muted:#5C6B60;--amber:#E9B86D;--border:#E3E0D6;--danger:#B42318}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif;font-size:16px;line-height:1.5}
+h1,h2,h3{font-family:"Plus Jakarta Sans",Inter,sans-serif;line-height:1.25}
+a{color:var(--primary-dark)}
+button,input,select,textarea{font:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+header{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--border);z-index:5}
+.nav{max-width:960px;margin:0 auto;padding:14px 16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.logo{font-family:"Plus Jakarta Sans",sans-serif;font-weight:800;font-size:20px;text-decoration:none;color:var(--text)}
+.logo span{color:var(--primary-dark)}
+.nav a.navlink{text-decoration:none;color:var(--text);font-weight:600;padding:6px 10px;border-radius:999px}
+.nav a.navlink.active{background:var(--primary);color:#fff}
+main{max-width:960px;margin:0 auto;padding:24px 16px 64px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;box-shadow:0 1px 3px rgba(38,53,43,.06)}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.item{cursor:pointer;transition:transform 150ms ease,box-shadow 150ms ease}
+.item:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(38,53,43,.10)}
+.item img{width:100%;height:160px;object-fit:cover;border-radius:10px;background:#EFEDE6}
+.badge{display:inline-block;background:#EEF2ED;color:var(--primary-dark);border-radius:999px;padding:2px 10px;font-size:13px;font-weight:600}
+.fav{color:#B7791F;font-weight:700}
+.btn{background:var(--primary);color:#fff;border:0;border-radius:999px;padding:10px 18px;font-weight:600;transition:background 150ms ease}
+.btn:hover{background:var(--primary-dark)}
+.btn.secondary{background:#fff;color:var(--text);border:1px solid var(--border)}
+.btn.danger{background:var(--danger)}
+.btn.small{padding:6px 12px;font-size:14px}
+input[type=text],input[type=search],select,textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#fff;color:var(--text)}
+label{display:block;font-weight:600;margin:14px 0 6px}
+.search{font-size:18px;padding:14px 16px;border-radius:999px}
+.status{border-radius:10px;padding:12px 14px;margin:16px 0;display:none}
+.status.show{display:block}
+.status.ok{background:#EAF3EC;border:1px solid #BFD8C3}
+.status.err{background:#FDECEA;border:1px solid #F0B8B2}
+.empty{text-align:center;color:var(--muted);padding:40px 16px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.muted{color:var(--muted)}
+.history{list-style:none;padding:0;margin:0}
+.history li{padding:10px 0;border-bottom:1px solid var(--border)}
+.history li:last-child{border-bottom:0}
+footer{max-width:960px;margin:0 auto;padding:0 16px 40px;color:var(--muted);font-size:14px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@media (max-width:480px){.nav{gap:8px}main{padding:16px 12px 48px}}
+</style>
+</head>
+<body>
+<header><nav class="nav" aria-label="Main">
+<a class="logo" href="#/">Where<span>WasIt</span></a>
+<a class="navlink" href="#/" data-nav="home">Home</a>
+<a class="navlink" href="#/items" data-nav="items">All Items</a>
+<a class="navlink" href="#/settings" data-nav="settings">Settings</a>
+<a class="btn" href="#/add" style="text-decoration:none;margin-left:auto">+ Add item</a>
+</nav></header>
+<main id="app" aria-live="polite"></main>
+<footer>WhereWasIt stores everything in your browser (IndexedDB). No account, no server, no data leaves your device. Photos are stored only as part of your own export file.</footer>
+<script>
+"use strict";
+var DB_NAME="wherewasit", DB_VERSION=1, STORE="items", LOC_STORE="locations";
+var app=document.getElementById("app");
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+function uid(){return "i_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,8);}
+function fmtDate(t){try{return new Date(t).toLocaleString();}catch(e){return String(t);}}
+function openDB(){return new Promise(function(res,rej){var r=indexedDB.open(DB_NAME,DB_VERSION);r.onupgradeneeded=function(){var db=r.result;if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE,{keyPath:"id"});if(!db.objectStoreNames.contains(LOC_STORE))db.createObjectStore(LOC_STORE,{keyPath:"name"});};r.onsuccess=function(){res(r.result);};r.onerror=function(){rej(r.error);};});}
+function tx(db,store,mode){return db.transaction(store,mode).objectStore(store);}
+function getAll(db,store){return new Promise(function(res,rej){var r=tx(db,store,"readonly").getAll();r.onsuccess=function(){res(r.result||[]);};r.onerror=function(){rej(r.error);};});}
+function put(db,store,val){return new Promise(function(res,rej){var r=tx(db,store,"readwrite").put(val);r.onsuccess=function(){res();};r.onerror=function(){rej(r.error);};});}
+function del(db,store,key){return new Promise(function(res,rej){var r=tx(db,store,"readwrite").delete(key);r.onsuccess=function(){res();};r.onerror=function(){rej(r.error);};});}
+function clearStore(db,store){return new Promise(function(res,rej){var r=tx(db,store,"readwrite").clear();r.onsuccess=function(){res();};r.onerror=function(){rej(r.error);};});}
+var dbPromise=openDB();
+var cache={items:[],locations:[]};
+function loadCache(){return dbPromise.then(function(db){return Promise.all([getAll(db,STORE),getAll(db,LOC_STORE)]).then(function(a){cache.items=a[0].sort(function(x,y){return y.updatedAt-x.updatedAt;});cache.locations=a[1].map(function(l){return l.name;}).sort();});});}
+function saveItem(item){return dbPromise.then(function(db){return put(db,STORE,item);}).then(loadCache);}
+function deleteItem(id){return dbPromise.then(function(db){return del(db,STORE,id);}).then(loadCache);}
+function saveLocation(name){name=name.trim();if(!name)return Promise.resolve();return dbPromise.then(function(db){return put(db,LOC_STORE,{name:name});}).then(loadCache);}
+function deleteLocation(name){return dbPromise.then(function(db){return del(db,LOC_STORE,name);}).then(loadCache);}
+function statusBox(id,ok,msg){var el=document.getElementById(id);if(!el)return;el.className="status show "+(ok?"ok":"err");el.textContent=msg;}
+function itemCard(it){var star=it.favorite?'<span class="fav" aria-label="Favorite">★ Favorite</span>':"";var photo=it.photo?'<img src="'+esc(it.photo)+'" alt="Photo of '+esc(it.name)+'">':"";return '<article class="card item" data-open="'+esc(it.id)+'" tabindex="0" role="button" aria-label="Open '+esc(it.name)+'">'+photo+'<h3 style="margin:12px 0 4px">'+esc(it.name)+' '+star+'</h3><p style="margin:0"><span class="badge">'+esc(it.category||"Uncategorized")+'</span></p><p style="margin:8px 0 0"><strong>Where:</strong> '+esc(it.location)+'</p><p class="muted" style="margin:4px 0 0;font-size:14px">Updated '+esc(fmtDate(it.updatedAt))+'</p></article>';}
+function filterItems(q){q=(q||"").trim().toLowerCase();if(!q)return cache.items.slice();return cache.items.filter(function(it){return (it.name+" "+(it.category||"")+" "+it.location+" "+(it.notes||"")).toLowerCase().indexOf(q)>=0;});}
+function listHTML(items,emptyMsg){if(!items.length)return '<div class="card empty"><p>'+esc(emptyMsg)+'</p><p><a class="btn" href="#/add" style="text-decoration:none">Add your first item</a></p></div>';return '<div class="grid">'+items.map(itemCard).join("")+'</div>';}
+function bindOpen(){app.querySelectorAll("[data-open]").forEach(function(el){function go(){location.hash="#/item/"+el.getAttribute("data-open");}el.addEventListener("click",go);el.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();go();}});});}
+function setActiveNav(name){document.querySelectorAll("[data-nav]").forEach(function(a){a.classList.toggle("active",a.getAttribute("data-nav")===name);});}
+</script>
+<script>
+function viewHome(){
+  setActiveNav("home");
+  var favs=cache.items.filter(function(i){return i.favorite;});
+  var recent=cache.items.slice(0,6);
+  app.innerHTML='<h1>Where did you put it?</h1><p class="muted">Search your things, see what moved lately, and pin the ones you look for most.</p>'
+  +'<input id="q" class="search" type="search" placeholder="Search items, categories, or places..." aria-label="Search items">'
+  +'<div id="results" style="margin-top:20px"></div>'
+  +'<h2 style="margin-top:32px">★ Favorites</h2><div id="favwrap"></div>'
+  +'<h2 style="margin-top:32px">Recently updated</h2><div id="recentwrap"></div>';
+  document.getElementById("favwrap").innerHTML=favs.length?listHTML(favs,"No favorites yet. Open an item and pin it."): '<div class="card empty"><p>No favorites yet. Open an item and pin it so it shows here.</p></div>';
+  document.getElementById("recentwrap").innerHTML=recent.length?listHTML(recent,"Nothing here yet."): '<div class="card empty"><p>No items yet. Add the first thing you keep losing, and WhereWasIt will remember where it lives.</p><p><a class="btn" href="#/add" style="text-decoration:none">Add your first item</a></p></div>';
+  var q=document.getElementById("q"),res=document.getElementById("results");
+  q.addEventListener("input",function(){var v=q.value.trim();if(!v){res.innerHTML="";return;}var hits=filterItems(v);res.innerHTML="<h2>Search results ("+hits.length+")</h2>"+listHTML(hits,"Nothing matches that search yet.");bindOpen();});
+  bindOpen();
+}
+function viewItems(){
+  setActiveNav("items");
+  app.innerHTML='<h1>All items</h1><input id="q" class="search" type="search" placeholder="Search items, categories, or places..." aria-label="Search items">'
+  +'<div class="row" style="margin-top:16px"><label style="margin:0">Category <select id="cat"><option value="">All categories</option></select></label>'
+  +'<label style="margin:0">Place <select id="loc"><option value="">All places</option></select></label></div>'
+  +'<div id="list" style="margin-top:20px"></div>';
+  var cats=[],locs=[];
+  cache.items.forEach(function(i){if(i.category&&cats.indexOf(i.category)<0)cats.push(i.category);if(locs.indexOf(i.location)<0)locs.push(i.location);});
+  cats.sort();locs.sort();
+  document.getElementById("cat").innerHTML='<option value="">All categories</option>'+cats.map(function(c){return '<option>'+esc(c)+'</option>';}).join("");
+  document.getElementById("loc").innerHTML='<option value="">All places</option>'+locs.map(function(c){return '<option>'+esc(c)+'</option>';}).join("");
+  function render(){var q=document.getElementById("q").value,cat=document.getElementById("cat").value,loc=document.getElementById("loc").value;var hits=filterItems(q).filter(function(i){return (!cat||i.category===cat)&&(!loc||i.location===loc);});document.getElementById("list").innerHTML='<p class="muted">'+hits.length+' item(s)</p>'+listHTML(hits,"No items match these filters.");bindOpen();}
+  ["q","cat","loc"].forEach(function(id){document.getElementById(id).addEventListener("input",render);});
+  render();
+}
+function photoInputHTML(){return '<label for="photo">Photo (optional, image only, max 5 MB)</label><input id="photo" type="file" accept="image/*">';}
+function readPhoto(file){return new Promise(function(res,rej){if(!file)return res(null);if(file.type.indexOf("image/")!==0)return rej(new Error("That file is not an image. Choose a JPG, PNG, or other image file."));if(file.size>5*1024*1024)return rej(new Error("That photo is over 5 MB. Choose a smaller image."));var r=new FileReader();r.onload=function(){res(r.result);};r.onerror=function(){rej(new Error("Could not read that photo."));};r.readAsDataURL(file);});}
+function formHTML(it,locOptions){
+  var isEdit=!!it;
+  return '<h1>'+(isEdit?"Edit item":"Add an item")+'</h1><div id="st" class="status" role="status"></div>'
+  +'<form id="f" class="card"><label for="name">Item name *</label><input id="name" type="text" required maxlength="120" value="'+esc(it?it.name:"")+'">'
+  +'<label for="location">Where is it? *</label><input id="location" type="text" required maxlength="120" list="loclist" value="'+esc(it?it.location:"")+'"><datalist id="loclist">'+locOptions.map(function(l){return '<option value="'+esc(l)+'">';}).join("")+'</datalist>'
+  +'<label for="category">Category</label><input id="category" type="text" maxlength="80" list="catlist" value="'+esc(it?it.category:"")+'"><datalist id="catlist"></datalist>'
+  +'<label for="notes">Notes</label><textarea id="notes" rows="3" maxlength="1000">'+esc(it?it.notes:"")+'</textarea>'
+  +photoInputHTML()+(it&&it.photo?'<p><img src="'+esc(it.photo)+'" alt="Current photo" style="max-width:240px;border-radius:10px"></p><label><input id="removephoto" type="checkbox"> Remove current photo</label>':"")
+  +'<label><input id="fav" type="checkbox" '+(it&&it.favorite?"checked":"")+'> Pin as favorite on Home</label>'
+  +'<div class="row" style="margin-top:20px"><button class="btn" type="submit">'+(isEdit?"Save changes":"Add item")+'</button><a class="btn secondary" style="text-decoration:none" href="#/">Cancel</a></div></form>';
+}
+function viewForm(id){
+  setActiveNav("");
+  var it=id?cache.items.find(function(x){return x.id===id;}):null;
+  if(id&&!it){app.innerHTML='<div class="card empty"><p>That item no longer exists.</p><p><a href="#/items">Back to all items</a></p></div>';return;}
+  app.innerHTML=formHTML(it,cache.locations);
+  var cats=[];cache.items.forEach(function(x){if(x.category&&cats.indexOf(x.category)<0)cats.push(x.category);});
+  document.getElementById("catlist").innerHTML=cats.map(function(c){return '<option value="'+esc(c)+'">';}).join("");
+  document.getElementById("f").addEventListener("submit",function(e){
+    e.preventDefault();
+    var name=document.getElementById("name").value.trim(),loc=document.getElementById("location").value.trim(),cat=document.getElementById("category").value.trim(),notes=document.getElementById("notes").value.trim(),fav=document.getElementById("fav").checked;
+    if(!name||!loc){statusBox("st",false,"Item name and location are both required.");return;}
+    var file=document.getElementById("photo").files[0];
+    readPhoto(file).then(function(photo){
+      var now=Date.now(),rm=document.getElementById("removephoto");
+      var item;
+      if(it){item=it;if(loc!==it.location){item.history.unshift({location:it.location,at:it.updatedAt});}item.name=name;item.location=loc;item.category=cat;item.notes=notes;item.favorite=fav;item.updatedAt=now;if(photo)item.photo=photo;else if(rm&&rm.checked)item.photo=null;}
+      else{item={id:uid(),name:name,location:loc,category:cat,notes:notes,favorite:fav,photo:photo,createdAt:now,updatedAt:now,history:[]};}
+      return saveLocation(loc).then(function(){return saveItem(item);}).then(function(){statusBox("st",true,it?"Changes saved.":"Item added.");setTimeout(function(){location.hash="#/item/"+item.id;},400);});
+    }).catch(function(err){statusBox("st",false,err.message||"Could not save that photo.");});
+  });
+}
+function viewDetail(id){
+  setActiveNav("");
+  var it=cache.items.find(function(x){return x.id===id;});
+  if(!it){app.innerHTML='<div class="card empty"><p>That item no longer exists.</p><p><a href="#/items">Back to all items</a></p></div>';return;}
+  var hist=it.history||[];
+  app.innerHTML='<p><a href="#/items">← All items</a></p><div class="card"><div id="st" class="status" role="status"></div>'
+  +(it.photo?'<img src="'+esc(it.photo)+'" alt="Photo of '+esc(it.name)+'" style="width:100%;max-height:360px;object-fit:cover;border-radius:10px">':"")
+  +'<h1 style="margin:12px 0 4px">'+esc(it.name)+' '+(it.favorite?'<span class="fav">★ Favorite</span>':"")+'</h1>'
+  +'<p><span class="badge">'+esc(it.category||"Uncategorized")+'</span></p>'
+  +'<p><strong>Where:</strong> '+esc(it.location)+'</p>'
+  +(it.notes?'<p><strong>Notes:</strong> '+esc(it.notes)+'</p>':"")
+  +'<p class="muted">Added '+esc(fmtDate(it.createdAt))+' · Updated '+esc(fmtDate(it.updatedAt))+'</p>'
+  +'<h2>Move it</h2><form id="movef" class="row"><label style="margin:0" for="newloc">New place</label><input id="newloc" type="text" required maxlength="120" list="loclist" style="max-width:260px"><datalist id="loclist">'+cache.locations.map(function(l){return '<option value="'+esc(l)+'">';}).join("")+'</datalist><button class="btn" type="submit">Move here</button></form>'
+  +'<div class="row" style="margin-top:20px"><a class="btn secondary" style="text-decoration:none" href="#/edit/'+esc(it.id)+'">Edit</a>'
+  +'<button class="btn secondary" id="favbtn">'+(it.favorite?"Remove favorite":"Pin as favorite")+'</button>'
+  +'<button class="btn danger" id="delbtn">Delete item</button></div></div>'
+  +'<div class="card" style="margin-top:16px"><h2>Location history</h2>'+(hist.length?'<ul class="history">'+hist.map(function(h){return '<li><strong>'+esc(h.location)+'</strong><br><span class="muted">'+esc(fmtDate(h.at))+'</span></li>';}).join("")+'</ul>':'<p class="muted">No moves recorded yet. The first move will appear here with its date and time.</p>')+'</div>';
+  document.getElementById("movef").addEventListener("submit",function(e){e.preventDefault();var nl=document.getElementById("newloc").value.trim();if(!nl)return;if(nl===it.location){statusBox("st",false,"It is already there.");return;}it.history.unshift({location:it.location,at:it.updatedAt});it.location=nl;it.updatedAt=Date.now();saveLocation(nl).then(function(){return saveItem(it);}).then(function(){statusBox("st",true,"Moved to "+nl+".");setTimeout(function(){viewDetail(id);},500);}).catch(function(){statusBox("st",false,"Could not save the move. Try again.");});});
+  document.getElementById("favbtn").addEventListener("click",function(){it.favorite=!it.favorite;it.updatedAt=Date.now();saveItem(it).then(function(){viewDetail(id);});});
+  document.getElementById("delbtn").addEventListener("click",function(){if(!confirm("Delete '"+it.name+"' and its history? This cannot be undone."))return;deleteItem(it.id).then(function(){location.hash="#/items";});});
+}
+function isValidItem(o){
+  if(!o||typeof o!=="object")return false;
+  if(typeof o.name!=="string"||!o.name.trim()||o.name.length>200)return false;
+  if(typeof o.location!=="string"||!o.location.trim()||o.location.length>200)return false;
+  if(o.category!==undefined&&typeof o.category!=="string")return false;
+  if(o.notes!==undefined&&typeof o.notes!=="string")return false;
+  if(o.favorite!==undefined&&typeof o.favorite!=="boolean")return false;
+  if(o.photo!==undefined&&o.photo!==null&&(typeof o.photo!=="string"||o.photo.indexOf("data:image/")!==0))return false;
+  if(o.history!==undefined){if(!Array.isArray(o.history))return false;for(var i=0;i<o.history.length;i++){var h=o.history[i];if(!h||typeof h.location!=="string"||!h.location.trim())return false;}}
+  return true;
+}
+function planImport(data,existingIds){
+  if(!data||!Array.isArray(data.items))return {error:"That file is not a WhereWasIt backup: it has no items list."};
+  for(var i=0;i<data.items.length;i++){if(!isValidItem(data.items[i]))return {error:"Record "+(i+1)+" is invalid (name and location are required, photos must be images). Nothing was imported."};}
+  var seen={};existingIds.forEach(function(id){seen[id]=true;});
+  var fresh=[],skipped=0;
+  data.items.forEach(function(x){
+    if(x.id&&seen[x.id]){skipped++;return;}
+    seen[x.id]=true;
+    var now=Date.now();
+    fresh.push({id:x.id||uid(),name:x.name.trim(),location:x.location.trim(),category:(x.category||"").trim(),notes:(x.notes||"").trim(),favorite:!!x.favorite,photo:x.photo||null,createdAt:(typeof x.createdAt==="number"&&isFinite(x.createdAt))?x.createdAt:now,updatedAt:(typeof x.updatedAt==="number"&&isFinite(x.updatedAt))?x.updatedAt:now,history:(x.history||[]).map(function(h){return {location:h.location.trim(),at:(typeof h.at==="number"&&isFinite(h.at))?h.at:now};})});
+  });
+  var locs=Array.isArray(data.locations)?data.locations.filter(function(l){return typeof l==="string"&&l.trim();}).map(function(l){return l.trim();}):[];
+  return {items:fresh,locations:locs,skipped:skipped};
+}
+function importAtomic(items,locations){
+  return dbPromise.then(function(db){return new Promise(function(res,rej){
+    var t=db.transaction([STORE,LOC_STORE],"readwrite");
+    var si=t.objectStore(STORE),sl=t.objectStore(LOC_STORE);
+    items.forEach(function(it){si.put(it);});
+    locations.forEach(function(l){sl.put({name:l});});
+    t.oncomplete=function(){res();};
+    t.onerror=function(){rej(t.error);};
+    t.onabort=function(){rej(t.error||new Error("Import transaction aborted; nothing was written."));};
+  });}).then(loadCache);
+}
+function viewSettings(){
+  setActiveNav("settings");
+  app.innerHTML='<h1>Settings</h1><div id="st" class="status" role="status"></div>'
+  +'<div class="card"><h2>Backup &amp; restore</h2><p class="muted">Export downloads everything, including photos, as one JSON file. Import checks the whole file first: if any record is invalid, nothing is changed.</p>'
+  +'<div class="row"><button class="btn" id="exportbtn">Export all data (JSON)</button><label class="btn secondary" style="padding:10px 18px">Import JSON<input id="importfile" type="file" accept="application/json,.json" hidden></label></div></div>'
+  +'<div class="card" style="margin-top:16px"><h2>Saved places</h2><p class="muted">Places you reuse appear as suggestions when adding or moving an item.</p><form id="locform" class="row"><input id="newplace" type="text" maxlength="120" placeholder="Add a place, e.g. Kitchen drawer" style="max-width:280px" required><button class="btn" type="submit">Add place</button></form><ul id="loclist2" class="history" style="margin-top:12px"></ul></div>'
+  +'<div class="card" style="margin-top:16px"><h2>Danger zone</h2><p class="muted">Clearing removes every item, photo, history entry, and saved place from this browser.</p><button class="btn danger" id="clearbtn">Clear all data</button></div>';
+  var ul=document.getElementById("loclist2");
+  ul.innerHTML=cache.locations.length?cache.locations.map(function(l){return '<li><span>'+esc(l)+'</span> <button class="btn secondary small" data-delloc="'+esc(l)+'">Remove</button></li>';}).join(""):'<li class="muted">No saved places yet.</li>';
+  ul.querySelectorAll("[data-delloc]").forEach(function(b){b.addEventListener("click",function(){if(!confirm("Remove '"+b.getAttribute("data-delloc")+"' from saved places? Items already stored there keep their location text."))return;deleteLocation(b.getAttribute("data-delloc")).then(viewSettings);});});
+  document.getElementById("locform").addEventListener("submit",function(e){e.preventDefault();var v=document.getElementById("newplace").value.trim();if(!v)return;saveLocation(v).then(function(){statusBox("st",true,"Place added.");viewSettings();});});
+  document.getElementById("exportbtn").addEventListener("click",function(){var data={app:"WhereWasIt",version:1,exportedAt:new Date().toISOString(),items:cache.items,locations:cache.locations};var blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="wherewasit-backup.json";a.click();setTimeout(function(){URL.revokeObjectURL(a.href);},1000);statusBox("st",true,"Backup downloaded.");});
+  document.getElementById("importfile").addEventListener("change",function(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(){try{var data=JSON.parse(r.result);var plan=planImport(data,cache.items.map(function(x){return x.id;}));if(plan.error)throw new Error(plan.error);
+  importAtomic(plan.items,plan.locations).then(function(){statusBox("st",true,"Imported "+plan.items.length+" item(s). Skipped "+plan.skipped+" duplicate(s). Nothing was overwritten.");setTimeout(viewSettings,600);}).catch(function(err){statusBox("st",false,"Import failed: "+(err&&err.message?err.message:err)+". Nothing was written.");});
+  }catch(err){statusBox("st",false,"Import failed: "+err.message);}};r.readAsText(f);});
+  document.getElementById("clearbtn").addEventListener("click",function(){if(!confirm("Clear ALL WhereWasIt data from this browser? This cannot be undone. Export a backup first if you want to keep anything."))return;dbPromise.then(function(db){return Promise.all([clearStore(db,STORE),clearStore(db,LOC_STORE)]);}).then(loadCache).then(function(){statusBox("st",true,"All data cleared.");viewSettings();});});
+}
+function route(){
+  var h=(location.hash||"#/").slice(2);
+  var parts=h.split("/");
+  loadCache().then(function(){
+    if(h===""||h==="/")viewHome();
+    else if(parts[0]==="items")viewItems();
+    else if(parts[0]==="item"&&parts[1])viewDetail(decodeURIComponent(parts[1]));
+    else if(parts[0]==="add")viewForm(null);
+    else if(parts[0]==="edit"&&parts[1])viewForm(decodeURIComponent(parts[1]));
+    else if(parts[0]==="settings")viewSettings();
+    else viewHome();
+  }).catch(function(){app.innerHTML='<div class="card empty"><p>WhereWasIt could not open its storage in this browser. IndexedDB may be blocked. Try another browser or allow site data.</p></div>';});
+}
+window.addEventListener("hashchange",route);
+route();
+</script>
+</body>
+</html>
