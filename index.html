@@ -150,7 +150,7 @@ function viewForm(id){
     readPhoto(file).then(function(photo){
       var now=Date.now(),rm=document.getElementById("removephoto");
       var item;
-      if(it){item=it;if(loc!==it.location){item.history.unshift({location:it.location,at:it.updatedAt});}item.name=name;item.location=loc;item.category=cat;item.notes=notes;item.favorite=fav;item.updatedAt=now;if(photo)item.photo=photo;else if(rm&&rm.checked)item.photo=null;}
+      if(it){item=it;if(loc!==it.location){item.history.unshift({location:it.location,at:Date.now()});}item.name=name;item.location=loc;item.category=cat;item.notes=notes;item.favorite=fav;item.updatedAt=now;if(photo)item.photo=photo;else if(rm&&rm.checked)item.photo=null;}
       else{item={id:uid(),name:name,location:loc,category:cat,notes:notes,favorite:fav,photo:photo,createdAt:now,updatedAt:now,history:[]};}
       return saveLocation(loc).then(function(){return saveItem(item);}).then(function(){statusBox("st",true,it?"Changes saved.":"Item added.");setTimeout(function(){location.hash="#/item/"+item.id;},400);});
     }).catch(function(err){statusBox("st",false,err.message||"Could not save that photo.");});
@@ -173,7 +173,7 @@ function viewDetail(id){
   +'<button class="btn secondary" id="favbtn">'+(it.favorite?"Remove favorite":"Pin as favorite")+'</button>'
   +'<button class="btn danger" id="delbtn">Delete item</button></div></div>'
   +'<div class="card" style="margin-top:16px"><h2>Location history</h2>'+(hist.length?'<ul class="history">'+hist.map(function(h){return '<li><strong>'+esc(h.location)+'</strong><br><span class="muted">'+esc(fmtDate(h.at))+'</span></li>';}).join("")+'</ul>':'<p class="muted">No moves recorded yet. The first move will appear here with its date and time.</p>')+'</div>';
-  document.getElementById("movef").addEventListener("submit",function(e){e.preventDefault();var nl=document.getElementById("newloc").value.trim();if(!nl)return;if(nl===it.location){statusBox("st",false,"It is already there.");return;}it.history.unshift({location:it.location,at:it.updatedAt});it.location=nl;it.updatedAt=Date.now();saveLocation(nl).then(function(){return saveItem(it);}).then(function(){statusBox("st",true,"Moved to "+nl+".");setTimeout(function(){viewDetail(id);},500);}).catch(function(){statusBox("st",false,"Could not save the move. Try again.");});});
+  document.getElementById("movef").addEventListener("submit",function(e){e.preventDefault();var nl=document.getElementById("newloc").value.trim();if(!nl)return;if(nl===it.location){statusBox("st",false,"It is already there.");return;}it.history.unshift({location:it.location,at:Date.now()});it.location=nl;it.updatedAt=Date.now();saveLocation(nl).then(function(){return saveItem(it);}).then(function(){statusBox("st",true,"Moved to "+nl+".");setTimeout(function(){viewDetail(id);},500);}).catch(function(){statusBox("st",false,"Could not save the move. Try again.");});});
   document.getElementById("favbtn").addEventListener("click",function(){it.favorite=!it.favorite;it.updatedAt=Date.now();saveItem(it).then(function(){viewDetail(id);});});
   document.getElementById("delbtn").addEventListener("click",function(){var b=this;armConfirm(b,"Tap again to confirm delete",function(){deleteItem(it.id).then(function(){location.hash="#/items";});});});
 }
@@ -213,6 +213,15 @@ function importAtomic(items,locations){
     t.onabort=function(){rej(t.error||new Error("Import transaction aborted; nothing was written."));};
   });}).then(loadCache);
 }
+function clearAtomic(){
+  return dbPromise.then(function(db){return new Promise(function(res,rej){
+    var t=db.transaction([STORE,LOC_STORE],"readwrite");
+    t.objectStore(STORE).clear();t.objectStore(LOC_STORE).clear();
+    t.oncomplete=function(){res();};
+    t.onerror=function(){rej(t.error);};
+    t.onabort=function(){rej(t.error||new Error("Clear transaction aborted; nothing was cleared."));};
+  });}).then(loadCache);
+}
 function viewSettings(){
   setActiveNav("settings");
   app.innerHTML='<h1>Settings</h1><div id="st" class="status" role="status"></div>'
@@ -222,13 +231,13 @@ function viewSettings(){
   +'<div class="card" style="margin-top:16px"><h2>Danger zone</h2><p class="muted">Clearing removes every item, photo, history entry, and saved place from this browser.</p><button class="btn danger" id="clearbtn">Clear all data</button></div>';
   var ul=document.getElementById("loclist2");
   ul.innerHTML=cache.locations.length?cache.locations.map(function(l){return '<li><span>'+esc(l)+'</span> <button class="btn secondary small" data-delloc="'+esc(l)+'">Remove</button></li>';}).join(""):'<li class="muted">No saved places yet.</li>';
-  ul.querySelectorAll("[data-delloc]").forEach(function(b){b.addEventListener("click",function(){armConfirm(b,"Tap again to confirm remove",function(){deleteLocation(b.getAttribute("data-delloc")).then(viewSettings);});});});
-  document.getElementById("locform").addEventListener("submit",function(e){e.preventDefault();var v=document.getElementById("newplace").value.trim();if(!v)return;saveLocation(v).then(function(){statusBox("st",true,"Place added.");viewSettings();});});
+  ul.querySelectorAll("[data-delloc]").forEach(function(b){b.addEventListener("click",function(){armConfirm(b,"Tap again to confirm remove",function(){deleteLocation(b.getAttribute("data-delloc")).then(function(){viewSettings();statusBox("st",true,"Place removed.");});});});});
+  document.getElementById("locform").addEventListener("submit",function(e){e.preventDefault();var v=document.getElementById("newplace").value.trim();if(!v)return;saveLocation(v).then(function(){viewSettings();statusBox("st",true,"Place added.");});});
   document.getElementById("exportbtn").addEventListener("click",function(){var data={app:"WhereWasIt",version:1,exportedAt:new Date().toISOString(),items:cache.items,locations:cache.locations};var blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="wherewasit-backup.json";a.click();setTimeout(function(){URL.revokeObjectURL(a.href);},1000);statusBox("st",true,"Backup downloaded.");});
   document.getElementById("importfile").addEventListener("change",function(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(){try{var data=JSON.parse(r.result);var plan=planImport(data,cache.items.map(function(x){return x.id;}));if(plan.error)throw new Error(plan.error);
-  importAtomic(plan.items,plan.locations).then(function(){statusBox("st",true,"Imported "+plan.items.length+" item(s). Skipped "+plan.skipped+" duplicate(s). Nothing was overwritten.");setTimeout(viewSettings,600);}).catch(function(err){statusBox("st",false,"Import failed: "+(err&&err.message?err.message:err)+". Nothing was written.");});
+  importAtomic(plan.items,plan.locations).then(function(){viewSettings();statusBox("st",true,"Imported "+plan.items.length+" item(s). Skipped "+plan.skipped+" duplicate(s). Nothing was overwritten.");}).catch(function(err){statusBox("st",false,"Import failed: "+(err&&err.message?err.message:err)+". Nothing was written.");});
   }catch(err){statusBox("st",false,"Import failed: "+err.message);}};r.readAsText(f);});
-  document.getElementById("clearbtn").addEventListener("click",function(){var b=this;armConfirm(b,"Tap again to clear all data",function(){dbPromise.then(function(db){return Promise.all([clearStore(db,STORE),clearStore(db,LOC_STORE)]);}).then(loadCache).then(function(){statusBox("st",true,"All data cleared.");viewSettings();});});});
+  document.getElementById("clearbtn").addEventListener("click",function(){var b=this;armConfirm(b,"Tap again to clear all data",function(){clearAtomic().then(function(){viewSettings();statusBox("st",true,"All data cleared.");});});});
 }
 function route(){
   var h=(location.hash||"#/").slice(2);
